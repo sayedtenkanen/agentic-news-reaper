@@ -1,0 +1,195 @@
+# Execution Pattern Templates for Hacker News Analysis
+# These patterns are used by the Execution Pattern Miner (EPM) to identify
+# repeatable execution patterns in Hacker News stories and comments.
+#
+# Each pattern has:
+# - id: unique identifier
+# - description: human-readable explanation
+# - trigger_conditions: conditions that must be met for matching
+# - confidence_weights: how to weight different signals
+# - execution_template: action to take if matched
+# - risk_level: inherent risk of this pattern
+
+patterns:
+  - id: "clickbait_upvote"
+    description: "Click-bait title leading to upvote cascade"
+    trigger_conditions:
+      title_contains:
+        - "shocking"
+        - "you won't believe"
+        - "this one trick"
+        - "unbelievable"
+        - "you won't believe what happened"
+      comment_upvote_ratio: 0.6
+      min_score: 100
+    confidence_weights:
+      title_match: 0.4
+      upvote_ratio: 0.3
+      comment_sentiment: 0.3
+    execution_template: "flag_for_manual_review('{{story_id}}')"
+    risk_level: "medium"
+
+  - id: "technical_discussion"
+    description: "Substantive technical discussion pattern"
+    trigger_conditions:
+      title_contains:
+        - "python"
+        - "rust"
+        - "javascript"
+        - "kubernetes"
+        - "docker"
+        - "database"
+      min_comments: 20
+      avg_comment_length: 150
+    confidence_weights:
+      title_match: 0.3
+      comment_count: 0.4
+      comment_depth: 0.3
+    execution_template: "add_to_digest('{{story_id}}')"
+    risk_level: "low"
+
+  - id: "security_vulnerability"
+    description: "Security vulnerability or exploit discussion"
+    trigger_conditions:
+      title_contains:
+        - "vulnerability"
+        - "security breach"
+        - "zero-day"
+        - "exploit"
+        - "cve-"
+      url_contains:
+        - "security"
+        - "cve"
+        - "exploit"
+    confidence_weights:
+      title_match: 0.5
+      url_match: 0.3
+      comment_urgency: 0.2
+    execution_template: "escalate_to_security_team('{{story_id}}')"
+    risk_level: "high"
+
+  - id: "startup_announcement"
+    description: "Startup announcement or launch pattern"
+    trigger_conditions:
+      title_contains:
+        - "launched"
+        - "announcing"
+        - "we built"
+        - "introducing"
+        - "startup"
+      url_domain_patterns:
+        - "product_hunt"
+        - "ycombinator"
+        - "techcrunch"
+    confidence_weights:
+      title_match: 0.4
+      domain_match: 0.6
+    execution_template: "add_to_startup_watch_list('{{story_id}}')"
+    risk_level: "medium"
+
+  - id: "cryptocurrency_hype"
+    description: "Cryptocurrency or blockchain hype discussion"
+    trigger_conditions:
+      title_contains:
+        - "bitcoin"
+        - "ethereum"
+        - "crypto"
+        - "nft"
+        - "blockchain"
+        - "web3"
+      comment_sentiment_variance: 0.8
+    confidence_weights:
+      title_match: 0.5
+      sentiment_variance: 0.5
+    execution_template: "flag_for_bias_check('{{story_id}}')"
+    risk_level: "high"
+
+  - id: "ai_ml_innovation"
+    description: "AI/ML innovation or breakthrough"
+    trigger_conditions:
+      title_contains:
+        - "llm"
+        - "large language model"
+        - "transformer"
+        - "neural network"
+        - "machine learning breakthrough"
+        - "ai"
+      min_comments: 15
+    confidence_weights:
+      title_match: 0.4
+      comment_count: 0.3
+      url_authority: 0.3
+    execution_template: "add_to_research_agenda('{{story_id}}')"
+    risk_level: "low"
+
+  - id: "controversial_politics"
+    description: "Politically controversial or off-topic discussion"
+    trigger_conditions:
+      title_contains:
+        - "politics"
+        - "election"
+        - "government"
+        - "elon"
+      comment_sentiment_variance: 0.9
+      negative_comment_ratio: 0.7
+    confidence_weights:
+      title_match: 0.4
+      sentiment_variance: 0.4
+      comment_negativity: 0.2
+    execution_template: "auto_defer('{{story_id}}')"
+    risk_level: "high"
+
+  - id: "community_feedback"
+    description: "Community feedback or meta-discussion"
+    trigger_conditions:
+      title_contains:
+        - "ask hn"
+        - "show hn"
+        - "feedback"
+        - "survey"
+      min_comments: 10
+    confidence_weights:
+      title_match: 0.6
+      comment_count: 0.4
+    execution_template: "add_to_community_signals('{{story_id}}')"
+    risk_level: "low"
+
+  - id: "spam_or_low_quality"
+    description: "Spam, low-quality, or spam-adjacent content"
+    trigger_conditions:
+      title_contains:
+        - "make money fast"
+        - "work from home"
+        - "click here"
+      url_on_blacklist: true
+      spam_score: 0.8
+    confidence_weights:
+      spam_score: 0.7
+      title_match: 0.2
+      blacklist_match: 0.1
+    execution_template: "mark_spam('{{story_id}}')"
+    risk_level: "low"
+
+  - id: "major_event"
+    description: "Major news event or incident"
+    trigger_conditions:
+      title_contains:
+        - "just happened"
+        - "breaking"
+        - "outage"
+        - "down"
+        - "incident"
+      rapid_comment_growth: true
+      score_spike: 0.8
+    confidence_weights:
+      title_match: 0.3
+      comment_velocity: 0.4
+      score_velocity: 0.3
+    execution_template: "alert_ops_team('{{story_id}}')"
+    risk_level: "medium"
+
+# Confidence calculation formula:
+# final_confidence = sum(weight_i * signal_i) / sum(weight_i)
+# Where signal_i is normalized to 0.0-1.0
+#
+# Patterns are matched sequentially, first match wins (highest confidence takes precedence)
