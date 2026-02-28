@@ -7,8 +7,98 @@ based on engagement, spam, and sentiment drift metrics.
 from dataclasses import dataclass
 
 from agentic_news_reaper.logging import get_logger
+from agentic_news_reaper.monty_runtime import run_monty
 
 logger = get_logger(__name__)
+
+
+_FMA_MONTY_CODE = """
+def analyze(
+    comment_count: int,
+    spam_score: float,
+    sentiment_variance: float,
+    engagement_weight: float,
+    spam_weight: float,
+    sentiment_weight: float,
+    low_engagement_threshold: float,
+    high_spam_threshold: float,
+) -> dict:
+    if comment_count >= low_engagement_threshold:
+        engagement_risk = 0.0
+    else:
+        engagement_risk = 1.0 - (comment_count / low_engagement_threshold)
+        if engagement_risk < 0.0:
+            engagement_risk = 0.0
+
+    spam_risk = spam_score
+    if spam_risk > 1.0:
+        spam_risk = 1.0
+    if spam_risk < 0.0:
+        spam_risk = 0.0
+
+    sentiment_drift = sentiment_variance
+    if sentiment_drift > 1.0:
+        sentiment_drift = 1.0
+    if sentiment_drift < 0.0:
+        sentiment_drift = 0.0
+
+    risk_score = (
+        engagement_risk * engagement_weight
+        + spam_risk * spam_weight
+        + sentiment_drift * sentiment_weight
+    )
+    if risk_score > 1.0:
+        risk_score = 1.0
+    if risk_score < 0.0:
+        risk_score = 0.0
+
+    mitigations = []
+    if engagement_risk > 0.7:
+        mitigations.append("add_to_watchlist")
+    if spam_risk > high_spam_threshold:
+        mitigations.append("flag_for_review")
+    if sentiment_drift > 0.8:
+        mitigations.append("auto_defer")
+
+    if mitigations:
+        mitigation = ";".join(mitigations)
+    else:
+        mitigation = "proceed_normally"
+
+    reasons = []
+    if engagement_risk > 0.7:
+        reasons.append(f"low engagement ({comment_count} comments)")
+    if spam_risk > 0.6:
+        reasons.append(f"spam risk ({spam_risk:.2f})")
+    if sentiment_drift > 0.7:
+        reasons.append(f"high sentiment variance ({sentiment_drift:.2f})")
+
+    if reasons:
+        reason = "; ".join(reasons)
+    else:
+        reason = "Low overall risk"
+
+    return {
+        "risk_score": risk_score,
+        "engagement_risk": engagement_risk,
+        "spam_risk": spam_risk,
+        "sentiment_drift": sentiment_drift,
+        "mitigation": mitigation,
+        "reason": reason,
+    }
+
+result = analyze(
+    comment_count,
+    spam_score,
+    sentiment_variance,
+    engagement_weight,
+    spam_weight,
+    sentiment_weight,
+    low_engagement_threshold,
+    high_spam_threshold,
+)
+result
+"""
 
 
 @dataclass
@@ -71,23 +161,26 @@ class FailureModeAnalyzer:
         Returns:
             FailureMode object with risk scores and mitigation.
         """
-        # Calculate individual risk components
-        engagement_risk = self._calculate_engagement_risk(comment_count)
-        spam_risk = min(1.0, spam_score)
-        sentiment_drift = min(1.0, sentiment_variance)
-
-        # Calculate weighted composite risk score
-        risk_score = (
-            engagement_risk * self.engagement_weight
-            + spam_risk * self.spam_weight
-            + sentiment_drift * self.sentiment_weight
+        result = run_monty(
+            _FMA_MONTY_CODE,
+            inputs={
+                "comment_count": comment_count,
+                "spam_score": spam_score,
+                "sentiment_variance": sentiment_variance,
+                "engagement_weight": self.engagement_weight,
+                "spam_weight": self.spam_weight,
+                "sentiment_weight": self.sentiment_weight,
+                "low_engagement_threshold": float(self.LOW_ENGAGEMENT_THRESHOLD),
+                "high_spam_threshold": self.HIGH_SPAM_THRESHOLD,
+            },
         )
 
-        # Determine mitigation strategy
-        mitigation = self._recommend_mitigation(engagement_risk, spam_risk, sentiment_drift)
-
-        # Build reason string
-        reason = self._build_reason(engagement_risk, spam_risk, sentiment_drift, comment_count)
+        engagement_risk = result["engagement_risk"]
+        spam_risk = result["spam_risk"]
+        sentiment_drift = result["sentiment_drift"]
+        risk_score = result["risk_score"]
+        mitigation = result["mitigation"]
+        reason = result["reason"]
 
         logger.info(
             "pattern_analyzed",
@@ -100,83 +193,10 @@ class FailureModeAnalyzer:
 
         return FailureMode(
             pattern_instance_id=pattern_instance_id,
-            risk_score=min(1.0, risk_score),
+            risk_score=risk_score,
             engagement_risk=engagement_risk,
             spam_risk=spam_risk,
             sentiment_drift=sentiment_drift,
             mitigation=mitigation,
             reason=reason,
         )
-
-    def _calculate_engagement_risk(self, comment_count: int) -> float:
-        """Calculate engagement risk based on comment count.
-
-        Args:
-            comment_count: Number of comments.
-
-        Returns:
-            Engagement risk score (0.0-1.0).
-        """
-        if comment_count >= self.LOW_ENGAGEMENT_THRESHOLD:
-            return 0.0
-        # Linear interpolation: 0 comments = 1.0 risk, threshold = 0.0 risk
-        return max(0.0, 1.0 - (comment_count / self.LOW_ENGAGEMENT_THRESHOLD))
-
-    def _recommend_mitigation(
-        self, engagement_risk: float, spam_risk: float, sentiment_drift: float
-    ) -> str:
-        """Recommend mitigation strategy based on risks.
-
-        Args:
-            engagement_risk: Engagement risk score.
-            spam_risk: Spam risk score.
-            sentiment_drift: Sentiment drift score.
-
-        Returns:
-            Mitigation recommendation string.
-        """
-        mitigations = []
-
-        if engagement_risk > 0.7:
-            mitigations.append("add_to_watchlist")
-        if spam_risk > self.HIGH_SPAM_THRESHOLD:
-            mitigations.append("flag_for_review")
-        if sentiment_drift > 0.8:
-            mitigations.append("auto_defer")
-
-        if not mitigations:
-            return "proceed_normally"
-
-        return ";".join(mitigations)
-
-    def _build_reason(
-        self,
-        engagement_risk: float,
-        spam_risk: float,
-        sentiment_drift: float,
-        comment_count: int,
-    ) -> str:
-        """Build a human-readable reason for the risk assessment.
-
-        Args:
-            engagement_risk: Engagement risk score.
-            spam_risk: Spam risk score.
-            sentiment_drift: Sentiment drift score.
-            comment_count: Number of comments.
-
-        Returns:
-            Human-readable reason string.
-        """
-        reasons = []
-
-        if engagement_risk > 0.7:
-            reasons.append(f"low engagement ({comment_count} comments)")
-        if spam_risk > 0.6:
-            reasons.append(f"spam risk ({spam_risk:.2f})")
-        if sentiment_drift > 0.7:
-            reasons.append(f"high sentiment variance ({sentiment_drift:.2f})")
-
-        if not reasons:
-            return "Low overall risk"
-
-        return "; ".join(reasons)
