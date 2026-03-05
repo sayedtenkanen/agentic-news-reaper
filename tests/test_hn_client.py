@@ -227,6 +227,59 @@ class TestCommentFetching:
                 assert len(result) == 1
                 assert result[0]["type"] == "comment"
 
+    @pytest.mark.asyncio
+    async def test_fetch_comments_recursive_with_nested_kids(self, hn_client):
+        """Test recursive comment fetching with nested kids."""
+        # Comment with nested kids
+        parent_comment = {
+            "by": "user1",
+            "id": 1,
+            "text": "Parent comment",
+            "kids": [2, 3],
+        }
+        child_comment_2 = {
+            "by": "user2",
+            "id": 2,
+            "text": "Child 1",
+            "kids": [],
+        }
+        child_comment_3 = {
+            "by": "user3",
+            "id": 3,
+            "text": "Child 2",
+            "kids": [],
+        }
+
+        with patch.object(hn_client, "get_stories_batch", new_callable=AsyncMock) as mock_batch:
+            # First call returns parent and children, second call returns only children
+            mock_batch.side_effect = [
+                [parent_comment, child_comment_2, child_comment_3],
+                [child_comment_2, child_comment_3],
+            ]
+
+            result = await hn_client._fetch_comments_recursive([1], max_depth=2)
+            # Should have at least the parent comment processed
+            assert len(result) >= 1
+            # Parent should have children field added
+            parent = next((c for c in result if c["id"] == 1), None)
+            assert parent is not None
+            assert "children" in parent
+
+    @pytest.mark.asyncio
+    async def test_fetch_comments_recursive_max_depth_reached(self, hn_client):
+        """Test recursive comment fetching respects max depth."""
+        with patch.object(hn_client, "get_stories_batch", new_callable=AsyncMock) as mock_batch:
+            # Should not call get_stories_batch when at max depth
+            result = await hn_client._fetch_comments_recursive([1, 2], max_depth=0)
+            assert result == []
+            mock_batch.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_fetch_comments_recursive_empty_list(self, hn_client):
+        """Test recursive comment fetching with empty list."""
+        result = await hn_client._fetch_comments_recursive([], max_depth=3)
+        assert result == []
+
 
 class TestCaching:
     """Tests for response caching."""
@@ -310,16 +363,16 @@ class TestURLConstruction:
     @pytest.mark.asyncio
     async def test_top_stories_url(self, hn_client):
         """Test top stories URL construction."""
-        with patch("httpx.AsyncClient") as mock_client:
-            mock_response = AsyncMock()
-            mock_response.json.return_value = []
-            mock_response.status_code = 200
-            mock_client.return_value.__aenter__.return_value.get.return_value = mock_response
+        with patch.object(hn_client, "_fetch", new_callable=AsyncMock) as mock_fetch:
+            mock_fetch.return_value = [1, 2, 3, 4, 5]
 
-            await hn_client.get_top_stories()
-            # Verify URL was constructed correctly
-            call_args = mock_client.return_value.__aenter__.return_value.get.call_args
+            result = await hn_client.get_top_stories(count=3)
+
+            # Verify _fetch was called with correct URL
+            assert mock_fetch.called
+            call_args = mock_fetch.call_args
             assert "topstories" in str(call_args)
+            assert result == [1, 2, 3]
 
     @pytest.mark.asyncio
     async def test_story_url(self, hn_client):
@@ -372,3 +425,74 @@ class TestIntegration:
             # Get individual stories
             story = await hn_client.get_story(1)
             assert story["title"] == "Story 1"
+
+
+class TestTopStoriesErrorHandling:
+    """Tests for error handling in get_top_stories."""
+
+    @pytest.mark.asyncio
+    async def test_get_top_stories_returns_none(self, hn_client):
+        """Test get_top_stories when _fetch returns None."""
+        with patch.object(hn_client, "_fetch", new_callable=AsyncMock) as mock_fetch:
+            mock_fetch.return_value = None
+            result = await hn_client.get_top_stories()
+            assert result == []
+
+    @pytest.mark.asyncio
+    async def test_get_top_stories_http_error(self, hn_client):
+        """Test get_top_stories with HTTP error."""
+        import httpx
+
+        with patch.object(hn_client, "_fetch", new_callable=AsyncMock) as mock_fetch:
+            mock_fetch.side_effect = httpx.HTTPStatusError(
+                "500",
+                request=MagicMock(),
+                response=MagicMock(),
+            )
+            with pytest.raises(httpx.HTTPStatusError):
+                await hn_client.get_top_stories()
+
+
+class TestStoryErrorHandling:
+    """Tests for error handling in story fetching."""
+
+    @pytest.mark.asyncio
+    async def test_get_story_http_error(self, hn_client):
+        """Test get_story with HTTP error re-raised."""
+        import httpx
+
+        with patch.object(hn_client, "_fetch", new_callable=AsyncMock) as mock_fetch:
+            mock_fetch.side_effect = httpx.HTTPStatusError(
+                "404",
+                request=MagicMock(),
+                response=MagicMock(),
+            )
+            with pytest.raises(httpx.HTTPStatusError):
+                await hn_client.get_story(99999)
+
+
+class TestUserErrorHandling:
+    """Tests for error handling in user fetching."""
+
+    @pytest.mark.asyncio
+    async def test_get_user_with_user_data(self, hn_client, mock_user_data):
+        """Test get_user when user exists."""
+        with patch.object(hn_client, "_fetch", new_callable=AsyncMock) as mock_fetch:
+            mock_fetch.return_value = mock_user_data
+            result = await hn_client.get_user("author")
+            assert result is not None
+            assert result["id"] == "author"
+
+    @pytest.mark.asyncio
+    async def test_get_user_http_error(self, hn_client):
+        """Test get_user with HTTP error."""
+        import httpx
+
+        with patch.object(hn_client, "_fetch", new_callable=AsyncMock) as mock_fetch:
+            mock_fetch.side_effect = httpx.HTTPStatusError(
+                "404",
+                request=MagicMock(),
+                response=MagicMock(),
+            )
+            with pytest.raises(httpx.HTTPStatusError):
+                await hn_client.get_user("nonexistent")

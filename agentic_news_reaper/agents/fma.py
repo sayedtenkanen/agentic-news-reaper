@@ -179,6 +179,8 @@ class FailureModeAnalyzer:
         spam_risk = result["spam_risk"]
         sentiment_drift = result["sentiment_drift"]
         risk_score = result["risk_score"]
+        # Clamp risk_score defensively to preserve invariant [0.0, 1.0]
+        risk_score = min(1.0, max(0.0, risk_score))
         mitigation = result["mitigation"]
         reason = result["reason"]
 

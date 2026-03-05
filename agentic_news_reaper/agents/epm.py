@@ -287,35 +287,48 @@ class ExecutionPatternMiner:
             pattern_count=len(self.patterns),
         )
 
-        result = run_monty(
-            _EPM_MONTY_HELPERS
-            + "\nresult = mine(patterns, min_confidence, title, url, metadata)\nresult",
-            inputs={
-                "patterns": self.patterns,
-                "min_confidence": self.min_confidence,
-                "title": title,
-                "url": url,
-                "metadata": metadata,
-            },
-        )
-
-        instances = [
-            PatternInstance(
-                pattern_id=item["pattern_id"],
-                story_id=item["story_id"],
-                confidence=item["confidence"],
-                pattern_data=item["pattern_data"],
+        try:
+            result = run_monty(
+                _EPM_MONTY_HELPERS
+                + "\nresult = mine(patterns, min_confidence, title, url, metadata)\nresult",
+                inputs={
+                    "patterns": self.patterns,
+                    "min_confidence": self.min_confidence,
+                    "title": title,
+                    "url": url,
+                    "metadata": metadata,
+                },
             )
-            for item in result
-        ]
 
-        logger.info(
-            "Pattern mining complete",
-            story_id=story_id,
-            matched_patterns=len(instances),
-        )
+            # Validate result is a list before iterating
+            if not isinstance(result, list):
+                logger.error(
+                    "Monty mine returned non-list result",
+                    story_id=story_id,
+                    result_type=type(result).__name__,
+                )
+                return []
 
-        return instances
+            instances = [
+                PatternInstance(
+                    pattern_id=item["pattern_id"],
+                    story_id=item["story_id"],
+                    confidence=item["confidence"],
+                    pattern_data=item["pattern_data"],
+                )
+                for item in result
+            ]
+
+            logger.info(
+                "Pattern mining complete",
+                story_id=story_id,
+                matched_patterns=len(instances),
+            )
+
+            return instances
+        except Exception as e:
+            logger.error("Error mining patterns", story_id=story_id, error=str(e))
+            return []
 
     def match_pattern(
         self,

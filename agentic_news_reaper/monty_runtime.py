@@ -4,8 +4,12 @@ from typing import Any
 
 import pydantic_monty
 
-# Cache compiled Monty instances to avoid re-parsing on each invocation
-_monty_cache: dict[str, pydantic_monty.Monty] = {}
+# Cache compiled Monty instances to avoid re-parsing on each invocation.
+# Key is a tuple: (code, type_check, type_check_stubs, sorted_input_keys, sorted_external_function_keys)
+# Inputs and external functions are included because they affect the Monty instance signature.
+_monty_cache: dict[
+    tuple[str, bool, str | None, tuple[str, ...], tuple[str, ...]], pydantic_monty.Monty
+] = {}
 
 
 def run_monty(
@@ -32,8 +36,11 @@ def run_monty(
     """
     external_functions = external_functions or {}
 
-    # Create a cache key from code and type-checking config
-    cache_key = (code, type_check, type_check_stubs)
+    # Create a cache key from code, type-checking config, and input/external function signatures.
+    # Using sorted tuples ensures consistent keys regardless of dict ordering.
+    input_keys = tuple(sorted(inputs.keys()))
+    external_keys = tuple(sorted(external_functions.keys()))
+    cache_key = (code, type_check, type_check_stubs, input_keys, external_keys)
 
     # Return cached Monty instance if available
     if cache_key in _monty_cache:

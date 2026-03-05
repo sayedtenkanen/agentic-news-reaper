@@ -24,6 +24,9 @@ def analyze(title: str, comments_count: int, ambiguity_threshold: float) -> dict
     if "?" in title:
         score += 0.2
 
+    if "!" in title:
+        score += 0.25
+
     if title.isupper():
         score += 0.15
     else:
