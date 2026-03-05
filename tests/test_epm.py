@@ -441,3 +441,29 @@ class TestEdgeCases:
             metadata={"story_id": "123"},
         )
         assert isinstance(results, list)
+
+    def test_invalid_yaml_file(self, tmp_path):
+        """Test handling of invalid YAML file."""
+        import yaml
+
+        invalid_yaml_file = tmp_path / "invalid.yaml"
+        invalid_yaml_file.write_text("{ invalid yaml: [}")
+        # Invalid YAML should raise error
+        with pytest.raises(yaml.YAMLError):
+            ExecutionPatternMiner(patterns_file=invalid_yaml_file)
+
+    def test_yaml_file_missing_patterns_key(self, tmp_path):
+        """Test YAML file without patterns key."""
+        patterns_file = tmp_path / "patterns.yaml"
+        patterns_file.write_text("other_key:\n  - item1\n  - item2")
+        # Should handle gracefully
+        epm = ExecutionPatternMiner(patterns_file=patterns_file)
+        assert len(epm.patterns) == 0
+
+    def test_yaml_file_empty(self, tmp_path):
+        """Test empty YAML file."""
+        patterns_file = tmp_path / "patterns.yaml"
+        patterns_file.write_text("")
+        # Should handle gracefully
+        epm = ExecutionPatternMiner(patterns_file=patterns_file)
+        assert len(epm.patterns) == 0

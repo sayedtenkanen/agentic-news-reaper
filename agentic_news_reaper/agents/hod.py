@@ -7,8 +7,49 @@ and business rules.
 from dataclasses import dataclass
 
 from agentic_news_reaper.logging import get_logger
+from agentic_news_reaper.monty_runtime import run_monty
 
 logger = get_logger(__name__)
+
+
+_HOD_MONTY_CODE = """
+def evaluate(
+    story_id: str,
+    risk_score: float,
+    pattern_type: str | None,
+    override_threshold: float,
+) -> dict:
+    requires_override = risk_score >= override_threshold
+
+    reason = ""
+    recommendation = None
+
+    if requires_override:
+        if pattern_type == "financial":
+            reason = "Potential market-impact investment decision"
+            recommendation = "Review with CFO before proceeding"
+        elif pattern_type == "security":
+            reason = "Security or privacy-related pattern detected"
+            recommendation = "Security review required"
+        else:
+            reason = (
+                f"Risk score {risk_score:.2f} exceeds override threshold {override_threshold}"
+            )
+            recommendation = "Manual review recommended"
+    else:
+        reason = f"Risk score {risk_score:.2f} within acceptable threshold"
+
+    return {
+        "story_id": story_id,
+        "requires_override": requires_override,
+        "risk_score": risk_score,
+        "reason": reason,
+        "recommendation": recommendation,
+    }
+
+result = evaluate(story_id, risk_score, pattern_type, override_threshold)
+result
+"""
 
 
 @dataclass
@@ -57,40 +98,32 @@ class HumanOverrideDetector:
         Returns:
             OverrideDecision with approval recommendation.
         """
-        business_context = business_context or {}
+        _ = business_context
 
-        # Check override threshold
-        requires_override = risk_score >= self.override_threshold
+        result = run_monty(
+            _HOD_MONTY_CODE,
+            inputs={
+                "story_id": story_id,
+                "risk_score": risk_score,
+                "pattern_type": pattern_type,
+                "override_threshold": self.override_threshold,
+            },
+        )
 
-        reason = ""
-        recommendation = None
-
-        if requires_override:
-            if pattern_type == "financial":
-                reason = "Potential market-impact investment decision"
-                recommendation = "Review with CFO before proceeding"
-            elif pattern_type == "security":
-                reason = "Security or privacy-related pattern detected"
-                recommendation = "Security review required"
-            else:
-                reason = f"Risk score {risk_score:.2f} exceeds override threshold {self.override_threshold}"
-                recommendation = "Manual review recommended"
-
+        if result["requires_override"]:
             logger.warning(
                 "Override required",
                 story_id=story_id,
                 risk_score=risk_score,
-                reason=reason,
+                reason=result["reason"],
             )
-        else:
-            reason = f"Risk score {risk_score:.2f} within acceptable threshold"
 
         return OverrideDecision(
-            story_id=story_id,
-            requires_override=requires_override,
-            risk_score=risk_score,
-            reason=reason,
-            recommendation=recommendation,
+            story_id=result["story_id"],
+            requires_override=result["requires_override"],
+            risk_score=result["risk_score"],
+            reason=result["reason"],
+            recommendation=result["recommendation"],
         )
 
     def batch_evaluate(
